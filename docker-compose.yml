@@ -1,0 +1,43 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: opsforge
+      POSTGRES_USER: opsforge
+      POSTGRES_PASSWORD: opsforge
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U opsforge -d opsforge"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  api:
+    build: .
+    environment:
+      OPSFORGE_APP_NAME: opsforge-local
+      OPSFORGE_LOG_LEVEL: INFO
+      OPSFORGE_DATABASE_URL: postgresql+psycopg://opsforge:opsforge@postgres:5432/opsforge
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  worker:
+    build: .
+    command: ["opsforge-worker"]
+    environment:
+      OPSFORGE_APP_NAME: opsforge-local
+      OPSFORGE_LOG_LEVEL: INFO
+      OPSFORGE_DATABASE_URL: postgresql+psycopg://opsforge:opsforge@postgres:5432/opsforge
+      OPSFORGE_WORKER_POLL_SECONDS: 2
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  postgres-data:
