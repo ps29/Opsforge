@@ -1,0 +1,89 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test Python app
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        run: python -m pip install uv
+
+      - name: Install dependencies
+        run: uv sync --extra dev --locked
+
+      - name: Run tests
+        run: uv run pytest
+
+  compose-smoke:
+    name: Build and smoke test Docker Compose
+    runs-on: ubuntu-latest
+    needs: test
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate Compose config
+        run: docker compose config
+
+      - name: Start local stack
+        run: docker compose up --build -d
+
+      - name: Wait for API readiness
+        run: |
+          for i in {1..30}; do
+            if curl --fail --silent http://localhost:8000/health/ready; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker compose logs
+          exit 1
+
+      - name: Run API and worker smoke test
+        run: |
+          curl --fail http://localhost:8000/health/live
+          curl --fail http://localhost:8000/metrics
+          response="$(curl --fail --silent \
+            --request POST \
+            --header 'Content-Type: application/json' \
+            --data '{"title":"CI latency report","owner":"platform","data":{"p95":180,"errors":2}}' \
+            http://localhost:8000/reports)"
+          job_id="$(python -c 'import json,sys; print(json.load(sys.stdin)["id"])' <<< "$response")"
+          for i in {1..15}; do
+            report="$(curl --fail --silent "http://localhost:8000/reports/${job_id}")"
+            status="$(python -c 'import json,sys; print(json.load(sys.stdin)["status"])' <<< "$report")"
+            if [ "$status" = "succeeded" ]; then
+              echo "$report"
+              exit 0
+            fi
+            sleep 2
+          done
+          docker compose logs
+          exit 1
+
+      - name: Show service logs
+        if: always()
+        run: docker compose logs --tail 100 api worker postgres
+
+      - name: Stop local stack
+        if: always()
+        run: docker compose down -v

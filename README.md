@@ -47,6 +47,31 @@ uv run opsforge-worker
 
 By default, local Python commands use `sqlite:///./opsforge.db`. Docker Compose uses PostgreSQL.
 
+## CI/CD
+
+GitHub Actions is split into separate CI and CD workflows.
+
+CI runs on pull requests and pushes to `main`:
+
+- installs dependencies with `uv sync --extra dev --locked`
+- runs `uv run pytest`
+- validates `docker compose config`
+- builds the Compose stack
+- smoke-tests health, metrics, report creation, and worker completion
+
+CD runs on pushes to `main`, `v*` tags, or manual dispatch:
+
+- builds the Docker image
+- publishes it to `ghcr.io/ps29/opsforge`
+- tags images by branch, version tag, and commit SHA
+
+Release example:
+
+```powershell
+git tag v0.1.0
+git push origin v0.1.0
+```
+
 ## API Surface
 
 - `GET /health/live`
